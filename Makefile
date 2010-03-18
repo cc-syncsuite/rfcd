@@ -11,3 +11,5 @@ link:
 	$(LD) _obj/$(TARG).a
 run:
 	./$(O).out
+rename:
+	mv ./$(O).out rfcd
