@@ -4,7 +4,9 @@ import (
 	"net"
 	"fmt"
 	"os"
+	"exec"
 	"bufio"
+	"io"
 	"flag"
 	"strings"
 )
@@ -63,13 +65,28 @@ func (c *CmdParser) GetCommand(cname string) (Command, bool) {
 	return cmd, ok
 }
 
-func (c *CmdParser) ExecuteCommand(cname string) bool {
+func dump(out io.Writer, in io.Reader) {
+	b := make([]byte, 1)
+	_, e := in.Read(b)
+	for e != os.EOF {
+		out.Write(b)
+		_, e = in.Read(b)
+	}
+}
+
+func (c *CmdParser) ExecuteCommand(cname string, output io.Writer) bool {
 	cmd, ok := c.GetCommand(cname)
 	if ok {
-		_, e := os.ForkExec(cmd.GetCommand(), cmd.GetArgs(), nil, "/", nil)
+		cmdpath, e := exec.LookPath(cmd.GetCommand())
 		if e != nil {
 			return false
 		}
+		proc, e := exec.Run(cmdpath, cmd.GetArgs(), nil, "/", exec.Pipe, exec.Pipe, exec.Pipe)
+		if e != nil {
+			return false
+		}
+		go dump(output, proc.Stdout)
+		go dump(output, proc.Stderr)
 	}
 	return ok
 }
@@ -122,7 +139,7 @@ func clientHandler(parser *CmdParser, c net.Conn) {
 	s = strings.Split(s, "\n", 2)[0]
 	for e != os.EOF {
 		fmt.Printf("Recieving from %s\n", c.RemoteAddr())
-		b := parser.ExecuteCommand(s)
+		b := parser.ExecuteCommand(s, c)
 		if b {
 			fmt.Fprintf(c, "OK\n")
 		} else {
