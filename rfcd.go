@@ -9,6 +9,7 @@ import (
 	"io"
 	"flag"
 	"strings"
+	"time"
 )
 
 const (
@@ -129,6 +130,7 @@ func readConfig(file string) (string, *CmdParser) {
 func accepter(l net.Listener, c chan net.Conn) {
 	for {
 		i, _ := l.Accept()
+		fmt.Printf("[%s]: %s connected\n", time.LocalTime(), i.RemoteAddr())
 		c<-i
 	}
 }
@@ -138,7 +140,6 @@ func clientHandler(parser *CmdParser, c net.Conn) {
 	s, e := r.ReadString('\n')
 	s = strings.Split(s, "\n", 2)[0]
 	for e != os.EOF {
-		fmt.Printf("Recieving from %s\n", c.RemoteAddr())
 		b := parser.ExecuteCommand(s, c)
 		if b {
 			fmt.Fprintf(c, "OK\n")
