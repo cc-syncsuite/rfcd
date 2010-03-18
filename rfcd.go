@@ -10,6 +10,7 @@ import (
 	"flag"
 	"strings"
 	"time"
+	"strconv"
 )
 
 const (
@@ -18,8 +19,8 @@ const (
 
 type Command struct {
 	name string
+	numargs int
 	command string
-	args []string
 }
 
 type CmdParser struct {
@@ -57,8 +58,8 @@ func NewCmdParser() (*CmdParser) {
 	return parser
 }
 
-func (c *CmdParser) AddCommand(cname, command string, args []string) {
-	c.cmds[cname] = Command{cname, command, args}
+func (c *CmdParser) AddCommand(cname string, numargs int, command string) {
+	c.cmds[cname] = Command{cname, numargs, command}
 }
 
 func (c *CmdParser) GetCommand(cname string) (Command, bool) {
@@ -75,21 +76,25 @@ func dump(out io.Writer, in io.Reader) {
 	}
 }
 
-func (c *CmdParser) ExecuteCommand(cname string, output io.Writer) bool {
+func (c *CmdParser) ExecuteCommand(cname string, args []string, output io.Writer) (bool, string) {
 	cmd, ok := c.GetCommand(cname)
 	if ok {
+		if len(args) != cmd.GetNumArgs() {
+			return false, "Arg count mismatch"
+		}
 		cmdpath, e := exec.LookPath(cmd.GetCommand())
 		if e != nil {
-			return false
+			return false, e.String()
 		}
-		proc, e := exec.Run(cmdpath, cmd.GetArgs(), nil, "/", exec.Pipe, exec.Pipe, exec.Pipe)
+		nargs := strings.Split(cmdpath+","+strings.Join(args,","),",",0)
+		proc, e := exec.Run(cmdpath, nargs, nil, "/", exec.Pipe, exec.Pipe, exec.Pipe)
 		if e != nil {
-			return false
+			return false, e.String()
 		}
 		go dump(output, proc.Stdout)
 		go dump(output, proc.Stderr)
 	}
-	return ok
+	return ok, "Command not configured"
 }
 
 func (c *Command) GetName() string {
@@ -100,8 +105,8 @@ func (c *Command) GetCommand() string {
 	return c.command
 }
 
-func (c *Command) GetArgs() []string {
-	return c.args
+func (c *Command) GetNumArgs() int {
+	return c.numargs
 }
 
 func readConfig(file string) (string, *CmdParser) {
@@ -114,15 +119,23 @@ func readConfig(file string) (string, *CmdParser) {
 	}
 	r := bufio.NewReader(h)
 	addr, e := r.ReadString('\n')
-	line, e := r.ReadString('\n')
-	for e != os.EOF {
-		t := strings.Split(line, "=", 2)
-		name := strings.TrimSpace(t[0])
-		t = strings.Split(strings.TrimSpace(t[1])," ",0)
-		cmd := t[0]
-		args := t
-		parser.AddCommand(name, cmd, args)
-		line, e = r.ReadString('\n')
+	addr = strings.Split(addr, "\n", 0)[0] //remove trailing newline
+	for line, e := r.ReadString('\n') ; e == nil ; line, e = r.ReadString('\n') {
+		line = strings.Split(line, "\n", 0)[0] // remove trailing newline
+		split := strings.Split(line, "=", 2)
+		parms := strings.Split(split[0], ",", 0)
+		if len(parms) < 2 || len(split) != 2{
+			fmt.Printf("Skipped line\n")
+			continue
+		}
+		n, e := strconv.Atoi(strings.TrimSpace(parms[1]))
+		if e != nil {
+			fmt.Fprintf(os.Stderr,"Atoi: %s\n", e)
+			os.Exit(1)
+		}
+		parser.AddCommand(strings.TrimSpace(parms[0]),
+			n,
+			strings.TrimSpace(split[1]))
 	}
 	return addr, parser
 }
@@ -137,17 +150,17 @@ func accepter(l net.Listener, c chan net.Conn) {
 
 func clientHandler(parser *CmdParser, c net.Conn) {
 	r := bufio.NewReader(c)
-	s, e := r.ReadString('\n')
-	s = strings.Split(s, "\n", 2)[0]
-	for e != os.EOF {
-		b := parser.ExecuteCommand(s, c)
+	for s, e := r.ReadString('\n'); e != os.EOF;  s, e = r.ReadString('\n') {
+		command := strings.Split(s, "\n", 2)[0] // Delete trailing newline
+		fmt.Printf("[%s] Recieving from %s:\n", time.LocalTime(), c.RemoteAddr())
+		fmt.Printf("\t\"%s\"\n", command)
+		split := strings.Split(command, ",",0)
+		b,s := parser.ExecuteCommand(split[0], split[1:], c)
 		if b {
 			fmt.Fprintf(c, "OK\n")
 		} else {
-			fmt.Fprintf(c, "ERR\n")
+			fmt.Fprintf(c, "ERR: %s\n", s)
 		}
-		s, e = r.ReadString('\n')
-		s = strings.Split(s, "\n", 2)[0]
 	}
 }
 
