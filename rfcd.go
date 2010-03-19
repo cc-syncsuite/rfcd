@@ -156,9 +156,7 @@ func clientHandler(parser *CmdParser, c net.Conn) {
 		split := strings.Split(command, ",", 0)
 		b,s := parser.ExecuteCommand(split[0], split[1:], c)
 
-		if b {
-			fmt.Fprintf(c, "OK\n")
-		} else {
+		if !b {
 			fmt.Fprintf(c, "ERR: %s\n", s)
 		}
 	}
