@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	DEFAULT_CONF = "/etc/rcfd.conf"
+	DEFAULT_CONF = "/etc/rfcd.conf"
 )
 
 type Command struct {
@@ -171,9 +171,7 @@ func main() {
 		flag.PrintDefaults() ;
 		os.Exit(0) ;
 	}
-
 	addr, parser := readConfig(file)
-
 	listener := createListener(addr)
 	clients := make(chan net.Conn)
 	go accepter(listener, clients)
