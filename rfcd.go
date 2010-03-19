@@ -70,7 +70,7 @@ func (c *CmdParser) GetCommand(cname string) (Command, bool) {
 func dump(out io.Writer, in io.Reader) {
 	b := make([]byte, 1)
 	_, e := in.Read(b)
-	for e != os.EOF {
+	for e == nil {
 		out.Write(b)
 		_, e = in.Read(b)
 	}
@@ -87,12 +87,11 @@ func (c *CmdParser) ExecuteCommand(cname string, args []string, output io.Writer
 			return false, e.String()
 		}
 		nargs := strings.Split(cmdpath+","+strings.Join(args,","),",",0)
-		proc, e := exec.Run(cmdpath, nargs, nil, "/", exec.Pipe, exec.Pipe, exec.Pipe)
+		proc, e := exec.Run(cmdpath, nargs, nil, "/", exec.DevNull, exec.Pipe, exec.DevNull)
 		if e != nil {
 			return false, e.String()
 		}
-		go dump(output, proc.Stdout)
-		go dump(output, proc.Stderr)
+		dump(output, proc.Stdout)
 	}
 	return ok, "Command not configured"
 }
@@ -143,19 +142,20 @@ func readConfig(file string) (string, *CmdParser) {
 func accepter(l net.Listener, c chan net.Conn) {
 	for {
 		i, _ := l.Accept()
-		fmt.Printf("[%s]: %s connected\n", time.LocalTime(), i.RemoteAddr())
+		fmt.Printf("[%s] %s connected\n", time.LocalTime(), i.RemoteAddr())
 		c<-i
 	}
 }
 
 func clientHandler(parser *CmdParser, c net.Conn) {
 	r := bufio.NewReader(c)
-	for s, e := r.ReadString('\n'); e != os.EOF;  s, e = r.ReadString('\n') {
+	for s, e := r.ReadString('\n'); e == nil; s, e = r.ReadString('\n') {
 		command := strings.Split(s, "\n", 2)[0] // Delete trailing newline
 		fmt.Printf("[%s] Recieving from %s:\n", time.LocalTime(), c.RemoteAddr())
 		fmt.Printf("\t\"%s\"\n", command)
-		split := strings.Split(command, ",",0)
+		split := strings.Split(command, ",", 0)
 		b,s := parser.ExecuteCommand(split[0], split[1:], c)
+
 		if b {
 			fmt.Fprintf(c, "OK\n")
 		} else {
