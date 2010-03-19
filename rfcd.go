@@ -141,9 +141,11 @@ func readConfig(file string) (string, *CmdParser) {
 
 func accepter(l net.Listener, c chan net.Conn) {
 	for {
-		i, _ := l.Accept()
-		fmt.Printf("[%s] %s connected\n", time.LocalTime(), i.RemoteAddr())
-		c<-i
+		i, e := l.Accept()
+		if e == nil {
+			fmt.Printf("[%s] %s connected\n", time.LocalTime(), i.RemoteAddr())
+			c<-i
+		}
 	}
 }
 
