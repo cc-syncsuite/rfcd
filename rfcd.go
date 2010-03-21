@@ -18,26 +18,26 @@ const (
 )
 
 type Command struct {
-	name string
+	name    string
 	numargs int
 	command string
 }
 
 type CmdParser struct {
-	cmds map[string] Command
+	cmds map[string]Command
 }
 
 func createListener(addr string) net.Listener {
 	tcpaddr, e := net.ResolveTCPAddr(strings.Split(addr, "\n", 2)[0])
 
 	if e != nil {
-		fmt.Fprintf(os.Stderr,"ResolveTCPAddr: %s\n", e)
+		fmt.Fprintf(os.Stderr, "ResolveTCPAddr: %s\n", e)
 		os.Exit(1)
 	}
 
 	socket, e := net.ListenTCP("tcp", tcpaddr)
 	if e != nil {
-		fmt.Fprintf(os.Stderr,"ListenTCP: %s\n", e)
+		fmt.Fprintf(os.Stderr, "ListenTCP: %s\n", e)
 		os.Exit(1)
 	}
 
@@ -52,9 +52,9 @@ func parseCmdLine() (string, bool) {
 	return *file, *help
 }
 
-func NewCmdParser() (*CmdParser) {
+func NewCmdParser() *CmdParser {
 	parser := new(CmdParser)
-	parser.cmds = make(map[string] Command)
+	parser.cmds = make(map[string]Command)
 	return parser
 }
 
@@ -86,7 +86,7 @@ func (c *CmdParser) ExecuteCommand(cname string, args []string, output io.Writer
 		if e != nil {
 			return false, e.String()
 		}
-		nargs := strings.Split(cmdpath+","+strings.Join(args,","),",",0)
+		nargs := strings.Split(cmdpath+","+strings.Join(args, ","), ",", 0)
 		proc, e := exec.Run(cmdpath, nargs, nil, "/", exec.DevNull, exec.Pipe, exec.DevNull)
 		if e != nil {
 			return false, e.String()
@@ -96,40 +96,34 @@ func (c *CmdParser) ExecuteCommand(cname string, args []string, output io.Writer
 	return ok, "Command not configured"
 }
 
-func (c *Command) GetName() string {
-	return c.name
-}
+func (c *Command) GetName() string { return c.name }
 
-func (c *Command) GetCommand() string {
-	return c.command
-}
+func (c *Command) GetCommand() string { return c.command }
 
-func (c *Command) GetNumArgs() int {
-	return c.numargs
-}
+func (c *Command) GetNumArgs() int { return c.numargs }
 
 func readConfig(file string) (string, *CmdParser) {
 	parser := NewCmdParser()
 
 	h, e := os.Open(file, os.O_RDONLY, 0)
 	if e != nil {
-		fmt.Fprintf(os.Stderr,"Open: %s\n", e)
+		fmt.Fprintf(os.Stderr, "Open: %s\n", e)
 		os.Exit(1)
 	}
 	r := bufio.NewReader(h)
 	addr, e := r.ReadString('\n')
 	addr = strings.Split(addr, "\n", 0)[0] //remove trailing newline
-	for line, e := r.ReadString('\n') ; e == nil ; line, e = r.ReadString('\n') {
+	for line, e := r.ReadString('\n'); e == nil; line, e = r.ReadString('\n') {
 		line = strings.Split(line, "\n", 0)[0] // remove trailing newline
 		split := strings.Split(line, "=", 2)
 		parms := strings.Split(split[0], ",", 0)
-		if len(parms) < 2 || len(split) != 2{
+		if len(parms) < 2 || len(split) != 2 {
 			fmt.Printf("Skipped line\n")
 			continue
 		}
 		n, e := strconv.Atoi(strings.TrimSpace(parms[1]))
 		if e != nil {
-			fmt.Fprintf(os.Stderr,"Atoi: %s\n", e)
+			fmt.Fprintf(os.Stderr, "Atoi: %s\n", e)
 			os.Exit(1)
 		}
 		parser.AddCommand(strings.TrimSpace(parms[0]),
@@ -144,7 +138,7 @@ func accepter(l net.Listener, c chan net.Conn) {
 		i, e := l.Accept()
 		if e == nil {
 			fmt.Printf("[%s] %s connected\n", time.LocalTime(), i.RemoteAddr())
-			c<-i
+			c <- i
 		}
 	}
 }
@@ -156,7 +150,7 @@ func clientHandler(parser *CmdParser, c net.Conn) {
 		fmt.Printf("[%s] Recieving from %s:\n", time.LocalTime(), c.RemoteAddr())
 		fmt.Printf("\t\"%s\"\n", command)
 		split := strings.Split(command, ",", 0)
-		b,s := parser.ExecuteCommand(split[0], split[1:], c)
+		b, s := parser.ExecuteCommand(split[0], split[1:], c)
 
 		if !b {
 			fmt.Fprintf(c, "ERR: %s\n", s)
@@ -168,8 +162,8 @@ func main() {
 	file, help := parseCmdLine()
 	if help {
 		fmt.Printf("Usage:\n")
-		flag.PrintDefaults() ;
-		os.Exit(0) ;
+		flag.PrintDefaults()
+		os.Exit(0)
 	}
 	addr, parser := readConfig(file)
 	listener := createListener(addr)
