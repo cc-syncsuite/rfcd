@@ -166,7 +166,7 @@ func clientHandler(parser *CmdParser, c net.Conn) {
 	for s, e := r.ReadString('\n'); e == nil; s, e = r.ReadString('\n') {
 		cmd, args := splitCmd(s)
 
-		fmt.Printf("[%s] %s: Received command: \"%s\"(", time.LocalTime(), c.RemoteAddr(), cmd)
+		fmt.Printf("\tReceived command: \"%s\"(", cmd)
 		for _, arg := range args {
 			fmt.Printf("\"%s\" ", arg)
 		}
@@ -179,9 +179,12 @@ func clientHandler(parser *CmdParser, c net.Conn) {
 			fmt.Fprintf(c, "ERR\n%s\n", s)
 		} else {
 			fmt.Fprintf(c, "OK\n")
-			fmt.Printf("[%s] %s: Sending answer...\n", time.LocalTime(), c.RemoteAddr())
+			fmt.Printf("\tSending answer...\n")
+			var ok os.Error
 			for _byte := range output {
-				c.Write([]byte{_byte})
+				if ok == nil {
+					_,ok = c.Write([]byte{_byte})
+				}
 			}
 		}
 	}
