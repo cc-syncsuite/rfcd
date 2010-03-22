@@ -7,9 +7,11 @@ GOFILES=\
 
 include $(GOROOT)/src/Make.pkg
 
-link:
-	$(LD) _obj/$(TARG).a
-run:
-	./$(O).out
-rename:
-	mv ./$(O).out rfcd
+CLEANFILES+=rfcd
+
+rfcd.$(O): rfcd.go
+	$(QUOTED_GOBIN)/$(GC) -I_obj $<
+
+rfcd: rfcd.$(O)
+	$(QUOTED_GOBIN)/$(LD) -L_obj -o $@ $<
+
