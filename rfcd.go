@@ -22,18 +22,21 @@ var (
 	globalConfig rfcdConfig
 )
 
+// Config declarations
 type rfcdConfig struct {
 	BindAddr  string
 	Port      int
 	Verbosity int
 	Delimiter string
 	Separator string
+	cmdlist   CommandList
 }
 
 func (c *rfcdConfig) GetSeparatorChar() byte { return c.Separator[0] }
 
 func (c *rfcdConfig) GetDelimiterChar() byte { return c.Delimiter[0] }
 
+// Request declarations
 type Request struct {
 	con net.Conn
 }
@@ -49,6 +52,32 @@ func (req *Request) GetReader() io.Reader { return req.con }
 
 func (req *Request) GetRemoteAddr() string { return req.con.RemoteAddr().String() }
 
+// CommandList declarations
+type CommandList struct {
+	cmds map[string]Command
+}
+
+func (c *CommandList) InitCommandList() { c.cmds = make(map[string]Command) }
+
+func (c *CommandList) RegisterCommand(keyword string, fp Command) {
+	c.cmds[keyword] = fp
+}
+
+func (c *CommandList) GetCommand(keyword string) (fp Command, b bool) {
+	fp, b = c.cmds[keyword]
+	return
+}
+
+// Command declarations
+type Command func(argv []string, output io.Writer)
+
+func echo_command(argv []string, output io.Writer) {
+	for i, k := range argv {
+		fmt.Fprintf(output, "%d = \"%s\"\n", i, k)
+	}
+}
+
+// Program functions
 func panicOnError(msg string, e os.Error) {
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", e)
@@ -96,7 +125,7 @@ func fillRequestChannel(listener net.Listener, reqChannel chan Request) {
 		con, e := listener.Accept()
 		if e == nil {
 			req := NewRequest(con)
-			debug(1, "%s connected", req.GetRemoteAddr())
+			debug(1, "%s: connected", req.GetRemoteAddr())
 			reqChannel <- req
 		}
 	}
@@ -122,8 +151,20 @@ func clientHandler(req Request) {
 	for entity, e := br.ReadString(globalConfig.GetDelimiterChar()); e == nil; entity, e = br.ReadString(globalConfig.GetDelimiterChar()) {
 		debug(1, "%s: Received \"%s\"", req.GetRemoteAddr(), entity)
 		elems := strings.Split(entity[0:len(entity)-1], globalConfig.Separator, 0)
-		for k, s := range elems {
-			debug(2, "%s: Tokenlist: %d = \"%s\"", req.GetRemoteAddr(), k, s)
+
+		if globalConfig.Verbosity >= 2 {
+			for k, s := range elems {
+				debug(2, "%s: Tokenlist: %d = \"%s\"", req.GetRemoteAddr(), k, s)
+			}
+			cmd, ok := globalConfig.cmdlist.GetCommand(elems[0])
+			debug(3, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd)
+			if ok {
+				fmt.Fprintf(req.GetWriter(), "OK\n")
+				debug(1, "%s: Executing \"%s\"", req.GetRemoteAddr(), elems[0])
+				cmd(elems[1:], req.GetWriter())
+			} else {
+				fmt.Fprintf(req.GetWriter(), "ERR\n")
+			}
 		}
 	}
 }
@@ -132,12 +173,17 @@ func main() {
 	configFile := parseCmdLine()
 
 	config, e := readConfigFile(configFile)
-	globalConfig = config
-	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
 	panicOnError("Reading configuration failed", e)
 
+	globalConfig = config
+	globalConfig.cmdlist.InitCommandList()
+	debug(3, "Registered \"echo_command\"")
+	globalConfig.cmdlist.RegisterCommand("echo", echo_command)
+
+	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
 	reqChannel, e := setupServer(globalConfig.BindAddr + ":" + strconv.Itoa(globalConfig.Port))
 	panicOnError("Opening server failed", e)
+
 	for req := range reqChannel {
 		go clientHandler(req)
 	}

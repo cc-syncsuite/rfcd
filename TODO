@@ -1,0 +1,3 @@
+* String-Trim which also removes '\n'
+* Exec, shutdown, reboot, cp commands
+* SegFault Testing
