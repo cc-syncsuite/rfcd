@@ -52,6 +52,15 @@ func (req *Request) GetReader() io.Reader { return req.con }
 
 func (req *Request) GetRemoteAddr() string { return req.con.RemoteAddr().String() }
 
+func (req *Request) WriteElement(s string) {
+	req.GetWriter().Write([]byte(s+globalConfig.Separator))
+}
+
+func (req *Request) DelimitEntity() {
+	req.GetWriter().Write([]byte{globalConfig.GetDelimiterChar()})
+}
+
+
 // CommandList declarations
 type CommandList struct {
 	cmds map[string]Command
@@ -69,15 +78,28 @@ func (c *CommandList) GetCommand(keyword string) (fp Command, b bool) {
 }
 
 // Command declarations
-type Command func(argv []string, output io.Writer)
+type Command func(argv []string, req Request) os.Error
 
-func echo_command(argv []string, output io.Writer) {
+func echo_command(argv []string, req Request) os.Error {
 	for i, k := range argv {
-		fmt.Fprintf(output, "%d = \"%s\"\n", i, k)
+		req.WriteElement(fmt.Sprintf("%d = \"%s\"", i, k))
 	}
+	return nil
 }
 
 // Program functions
+
+func isWhite(b byte) bool {
+	return b == ' ' || b == '\n' || b == '\t'
+}
+
+func myTrim(s string) string {
+	var i,j int
+	for i = 0; i < len(s) && isWhite(s[i]); i++ {}
+	for j = len(s)-1; j>0 && isWhite(s[j]); j-- {}
+	return s[i:j+1]
+}
+
 func panicOnError(msg string, e os.Error) {
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", e)
@@ -149,23 +171,25 @@ func setupServer(addr string) (chan Request, os.Error) {
 func clientHandler(req Request) {
 	br := bufio.NewReader(req.GetReader())
 	for entity, e := br.ReadString(globalConfig.GetDelimiterChar()); e == nil; entity, e = br.ReadString(globalConfig.GetDelimiterChar()) {
+		entity = myTrim(entity)
 		debug(1, "%s: Received \"%s\"", req.GetRemoteAddr(), entity)
 		elems := strings.Split(entity[0:len(entity)-1], globalConfig.Separator, 0)
 
-		if globalConfig.Verbosity >= 2 {
+		if globalConfig.Verbosity >= 3 {
 			for k, s := range elems {
-				debug(2, "%s: Tokenlist: %d = \"%s\"", req.GetRemoteAddr(), k, s)
-			}
-			cmd, ok := globalConfig.cmdlist.GetCommand(elems[0])
-			debug(3, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd)
-			if ok {
-				fmt.Fprintf(req.GetWriter(), "OK\n")
-				debug(1, "%s: Executing \"%s\"", req.GetRemoteAddr(), elems[0])
-				cmd(elems[1:], req.GetWriter())
-			} else {
-				fmt.Fprintf(req.GetWriter(), "ERR\n")
+				debug(3, "%s: Tokenlist: %d = \"%s\"", req.GetRemoteAddr(), k, s)
 			}
 		}
+		cmd, ok := globalConfig.cmdlist.GetCommand(elems[0])
+		debug(1, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd)
+		if ok {
+			req.WriteElement("OK")
+			debug(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), elems[0])
+			cmd(elems[1:], req)
+		} else {
+			req.WriteElement("ERR")
+		}
+		req.DelimitEntity()
 	}
 }
 
