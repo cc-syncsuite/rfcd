@@ -12,6 +12,7 @@ import (
 	"time"
 	"bufio"
 	"strings"
+	"exec"
 )
 
 const (
@@ -85,6 +86,56 @@ func echo_command(argv []string, req Request) os.Error {
 		req.WriteElement(fmt.Sprintf("%d = \"%s\"", i, k))
 	}
 	return nil
+}
+
+func exec_command(argv []string, req Request) os.Error {
+	newpath, e := exec.LookPath(argv[0])
+	if e != nil {
+		return e
+	}
+	debug(3, "Found executable in $PATH: %s", newpath)
+
+	cmd_exec, e := exec.Run(newpath, argv, nil, "/", exec.DevNull, exec.Pipe, exec.Pipe)
+	if e != nil {
+		return e
+	}
+
+	debug(2, "Executed %s: PID %d", argv[0], cmd_exec.Pid)
+	cmd_exec.Wait(0)
+	io.Copy(req.GetWriter(), cmd_exec.Stdout)
+	io.Copy(req.GetWriter(), cmd_exec.Stderr)
+	return nil
+}
+
+
+func cp_command(argv []string, req Request) os.Error {
+	src, e := os.Open(argv[0], os.O_RDONLY, 0)
+	if e != nil {
+		return e
+	}
+
+	srcstat, e := src.Stat()
+	if e != nil {
+		return e
+	}
+
+	dst, e := os.Open(argv[1], os.O_WRONLY | os.O_CREATE, srcstat.Permission())
+	if e != nil {
+		return e
+	}
+
+	data, e := ioutil.ReadAll(src)
+	if e != nil {
+		return e
+	}
+
+	_,e = dst.Write(data)
+	if e != nil {
+		return e
+	}
+
+	return nil
+
 }
 
 // Program functions
@@ -185,7 +236,10 @@ func clientHandler(req Request) {
 		if ok {
 			req.WriteElement("OK")
 			debug(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), elems[0])
-			cmd(elems[1:], req)
+			e = cmd(elems[1:], req)
+			if e != nil {
+				debug(1,"%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), elems[0], e)
+			}
 		} else {
 			req.WriteElement("ERR")
 		}
@@ -201,8 +255,12 @@ func main() {
 
 	globalConfig = config
 	globalConfig.cmdlist.InitCommandList()
-	debug(3, "Registered \"echo_command\"")
+	debug(3, "Registered \"echo_command\"a")
 	globalConfig.cmdlist.RegisterCommand("echo", echo_command)
+	debug(3, "Registered \"cp_command\"")
+	globalConfig.cmdlist.RegisterCommand("exec", exec_command)
+	debug(3, "Registered \"exec_command\"")
+	globalConfig.cmdlist.RegisterCommand("cp", cp_command)
 
 	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
 	reqChannel, e := setupServer(globalConfig.BindAddr + ":" + strconv.Itoa(globalConfig.Port))
