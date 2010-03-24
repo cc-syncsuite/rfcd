@@ -21,6 +21,11 @@ const (
 
 var (
 	globalConfig rfcdConfig
+	builtins = map[string] Command {
+		"echo" : echo_command,
+		"exec" : exec_command,
+		"cp"   : cp_command,
+	}
 )
 
 // Config declarations
@@ -30,6 +35,7 @@ type rfcdConfig struct {
 	Verbosity int
 	Delimiter string
 	Separator string
+	EnabledCommands  []string
 	cmdlist   CommandList
 }
 
@@ -255,12 +261,10 @@ func main() {
 
 	globalConfig = config
 	globalConfig.cmdlist.InitCommandList()
-	debug(3, "Registered \"echo_command\"a")
-	globalConfig.cmdlist.RegisterCommand("echo", echo_command)
-	debug(3, "Registered \"cp_command\"")
-	globalConfig.cmdlist.RegisterCommand("exec", exec_command)
-	debug(3, "Registered \"exec_command\"")
-	globalConfig.cmdlist.RegisterCommand("cp", cp_command)
+	for _,cmd := range globalConfig.EnabledCommands {
+		debug(3, "Registered \"%s\"-Command", cmd)
+		globalConfig.cmdlist.RegisterCommand(cmd, builtins[cmd])
+	}
 
 	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
 	reqChannel, e := setupServer(globalConfig.BindAddr + ":" + strconv.Itoa(globalConfig.Port))
