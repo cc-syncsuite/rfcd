@@ -54,7 +54,7 @@ func (req *Request) GetReader() io.Reader { return req.con }
 func (req *Request) GetRemoteAddr() string { return req.con.RemoteAddr().String() }
 
 func (req *Request) WriteElement(s string) {
-	req.GetWriter().Write([]byte(s+globalConfig.Separator))
+	req.GetWriter().Write([]byte(s + globalConfig.Separator))
 }
 
 func (req *Request) DelimitEntity() {
@@ -119,7 +119,7 @@ func cp_command(argv []string, req Request) os.Error {
 		return e
 	}
 
-	dst, e := os.Open(argv[1], os.O_WRONLY | os.O_CREATE, srcstat.Permission())
+	dst, e := os.Open(argv[1], os.O_WRONLY|os.O_CREATE, srcstat.Permission())
 	if e != nil {
 		return e
 	}
@@ -129,7 +129,7 @@ func cp_command(argv []string, req Request) os.Error {
 		return e
 	}
 
-	_,e = dst.Write(data)
+	_, e = dst.Write(data)
 	if e != nil {
 		return e
 	}
@@ -140,15 +140,15 @@ func cp_command(argv []string, req Request) os.Error {
 
 // Program functions
 
-func isWhite(b byte) bool {
-	return b == ' ' || b == '\n' || b == '\t'
-}
+func isWhite(b byte) bool { return b == ' ' || b == '\n' || b == '\t' }
 
 func myTrim(s string) string {
-	var i,j int
-	for i = 0; i < len(s) && isWhite(s[i]); i++ {}
-	for j = len(s)-1; j>0 && isWhite(s[j]); j-- {}
-	return s[i:j+1]
+	var i, j int
+	for i = 0; i < len(s) && isWhite(s[i]); i++ {
+	}
+	for j = len(s) - 1; j > 0 && isWhite(s[j]); j-- {
+	}
+	return s[i : j+1]
 }
 
 func panicOnError(msg string, e os.Error) {
@@ -238,7 +238,7 @@ func clientHandler(req Request) {
 			debug(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), elems[0])
 			e = cmd(elems[1:], req)
 			if e != nil {
-				debug(1,"%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), elems[0], e)
+				debug(1, "%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), elems[0], e)
 			}
 		} else {
 			req.WriteElement("ERR")
