@@ -21,27 +21,34 @@ const (
 
 var (
 	globalConfig rfcdConfig
-	builtins = map[string] Command {
-		"echo" : echo_command,
-		"exec" : exec_command,
-		"cp"   : cp_command,
+	builtins     = map[string]Command{
+		"echo": echo_command,
+		"exec": exec_command,
+		"cp":   cp_command,
 	}
 )
 
 // Config declarations
 type rfcdConfig struct {
-	BindAddr  string
-	Port      int
-	Verbosity int
-	Delimiter string
-	Separator string
-	EnabledCommands  []string
-	cmdlist   CommandList
+	BindAddr       string
+	Port           int
+	Verbosity      int
+	Delimiter      string
+	Separator      string
+	CommandConfigs []CommandConfig
+	cmdlist        CommandList
 }
 
 func (c *rfcdConfig) GetSeparatorChar() byte { return c.Separator[0] }
 
 func (c *rfcdConfig) GetDelimiterChar() byte { return c.Delimiter[0] }
+
+// CommandConfig declaration
+type CommandConfig struct {
+	CommandName         string
+	CommandParams       []string
+	ParsedCommandParams map[string]string
+}
 
 // Request declarations
 type Request struct {
@@ -261,9 +268,9 @@ func main() {
 
 	globalConfig = config
 	globalConfig.cmdlist.InitCommandList()
-	for _,cmd := range globalConfig.EnabledCommands {
-		debug(3, "Registered \"%s\"-Command", cmd)
-		globalConfig.cmdlist.RegisterCommand(cmd, builtins[cmd])
+	for _, cmd := range globalConfig.CommandConfigs {
+		debug(3, "Registered \"%s\"-Command", cmd.CommandName)
+		globalConfig.cmdlist.RegisterCommand(cmd.CommandName, builtins[cmd.CommandName])
 	}
 
 	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
