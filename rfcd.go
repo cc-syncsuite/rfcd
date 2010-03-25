@@ -12,6 +12,7 @@ import (
 	"time"
 	"bufio"
 	"strings"
+	"regexp"
 	"exec"
 )
 
@@ -21,7 +22,7 @@ const (
 
 var (
 	globalConfig rfcdConfig
-	builtins     = map[string]Command{
+	builtins     = map[string]CommandFunc{
 		"echo": echo_command,
 		"exec": exec_command,
 		"cp":   cp_command,
@@ -36,18 +37,46 @@ type rfcdConfig struct {
 	Delimiter      string
 	Separator      string
 	CommandConfigs []CommandConfig
-	cmdlist        CommandList
+	parsed         map[string]Command
 }
 
 func (c *rfcdConfig) GetSeparatorChar() byte { return c.Separator[0] }
 
 func (c *rfcdConfig) GetDelimiterChar() byte { return c.Delimiter[0] }
 
+func (c *rfcdConfig) getCommandConfig(keyword string) (*CommandConfig, os.Error) {
+	for _, cc := range c.CommandConfigs {
+		if cc.CommandName == keyword {
+			return &cc, nil
+		}
+	}
+	return nil, os.NewError("Not a valid key")
+}
+
+func (c *rfcdConfig) RegisterCommand(keyword string, fp CommandFunc) {
+	if c.parsed == nil {
+		c.parsed = make(map[string]Command)
+	}
+	cc, _ := c.getCommandConfig(keyword)
+	opts := stringSliceToMap(cc.CommandParams, ":")
+	if c.Verbosity >= 4 {
+		debug(4, "\t\"%s\" opts:", keyword)
+		for key, val := range opts {
+			debug(4, "\t\t\"%s\" => \"%s\"", key, val)
+		}
+	}
+	c.parsed[keyword] = Command{keyword, fp, opts}
+}
+
+func (c *rfcdConfig) GetCommand(keyword string) (cmd Command, ok bool) {
+	cmd, ok = c.parsed[keyword]
+	return
+}
+
 // CommandConfig declaration
 type CommandConfig struct {
-	CommandName         string
-	CommandParams       []string
-	ParsedCommandParams map[string]string
+	CommandName   string
+	CommandParams []string
 }
 
 // Request declarations
@@ -74,80 +103,87 @@ func (req *Request) DelimitEntity() {
 	req.GetWriter().Write([]byte{globalConfig.GetDelimiterChar()})
 }
 
-
-// CommandList declarations
-type CommandList struct {
-	cmds map[string]Command
-}
-
-func (c *CommandList) InitCommandList() { c.cmds = make(map[string]Command) }
-
-func (c *CommandList) RegisterCommand(keyword string, fp Command) {
-	c.cmds[keyword] = fp
-}
-
-func (c *CommandList) GetCommand(keyword string) (fp Command, b bool) {
-	fp, b = c.cmds[keyword]
-	return
+// CommandInternals declarations
+type Command struct {
+	cmd      string
+	fp       CommandFunc
+	confopts map[string]string
 }
 
 // Command declarations
-type Command func(argv []string, req Request) os.Error
+type CommandFunc func(argv []string, confopts map[string]string) ([]string, os.Error)
 
-func echo_command(argv []string, req Request) os.Error {
-	for i, k := range argv {
-		req.WriteElement(fmt.Sprintf("%d = \"%s\"", i, k))
-	}
-	return nil
+func echo_command(argv []string, confopts map[string]string) ([]string, os.Error) {
+	return argv, nil
 }
 
-func exec_command(argv []string, req Request) os.Error {
+func exec_command(argv []string, confopts map[string]string) ([]string, os.Error) {
+	reStr, ok := confopts["Allow"]
+	if !ok {
+		debug(3, "\"Allow\" not configured, defaulting to \".+\"")
+		reStr = ".+"
+	}
+
+	re, e := regexp.Compile(reStr)
+	if e != nil {
+		return nil, e
+	}
+
 	newpath, e := exec.LookPath(argv[0])
 	if e != nil {
-		return e
+		return nil, e
 	}
-	debug(3, "Found executable in $PATH: %s", newpath)
+	debug(3, "\tFound executable in $PATH: %s", newpath)
+
+	if !re.MatchString(newpath) {
+		debug(1, "\tReceived unallowed command \"%s\" (Rule: \"%s\")", newpath, confopts["Allow"])
+		return nil, os.NewError("Not Allowed")
+	}
 
 	cmd_exec, e := exec.Run(newpath, argv, nil, "/", exec.DevNull, exec.Pipe, exec.Pipe)
 	if e != nil {
-		return e
+		return nil, e
 	}
 
 	debug(2, "Executed %s: PID %d", argv[0], cmd_exec.Pid)
 	cmd_exec.Wait(0)
-	io.Copy(req.GetWriter(), cmd_exec.Stdout)
-	io.Copy(req.GetWriter(), cmd_exec.Stderr)
-	return nil
+
+	var output [2]string
+	read, _ := ioutil.ReadAll(cmd_exec.Stdout)
+	output[0] = string(read)
+	read, _ = ioutil.ReadAll(cmd_exec.Stderr)
+	output[1] = string(read)
+	return &output, nil
 }
 
 
-func cp_command(argv []string, req Request) os.Error {
+func cp_command(argv []string, confopts map[string]string) ([]string, os.Error) {
 	src, e := os.Open(argv[0], os.O_RDONLY, 0)
 	if e != nil {
-		return e
+		return nil, e
 	}
 
 	srcstat, e := src.Stat()
 	if e != nil {
-		return e
+		return nil, e
 	}
 
 	dst, e := os.Open(argv[1], os.O_WRONLY|os.O_CREATE, srcstat.Permission())
 	if e != nil {
-		return e
+		return nil, e
 	}
 
 	data, e := ioutil.ReadAll(src)
 	if e != nil {
-		return e
+		return nil, e
 	}
 
 	_, e = dst.Write(data)
 	if e != nil {
-		return e
+		return nil, e
 	}
 
-	return nil
+	return nil, nil
 
 }
 
@@ -164,9 +200,10 @@ func myTrim(s string) string {
 	return s[i : j+1]
 }
 
-func panicOnError(msg string, e os.Error) {
+func panicOnError(msg string, e os.Error, a ...interface{}) {
 	if e != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", e)
+		userMsg := fmt.Sprintf(msg, a)
+		fmt.Fprintf(os.Stderr, "Error: %s: %s\n", userMsg, e)
 		panic(msg)
 	}
 }
@@ -185,6 +222,15 @@ func parseCmdLine() string {
 	return *file
 }
 
+func stringSliceToMap(strslice []string, sep string) (ret map[string]string) {
+	ret = make(map[string]string)
+	for _, mapentry := range strslice {
+		elems := strings.Split(mapentry, sep, 2)
+		ret[elems[0]] = elems[1]
+	}
+	return
+}
+
 func readConfig(r io.Reader) (rfcdConfig, os.Error) {
 	var config rfcdConfig
 	bRead, error := ioutil.ReadAll(r)
@@ -194,6 +240,7 @@ func readConfig(r io.Reader) (rfcdConfig, os.Error) {
 			error = os.NewError("Offending Token in config file: " + errTok)
 		}
 	}
+	//	config.CommandConfigs.ParsedCommandParams
 	return config, error
 }
 
@@ -244,14 +291,19 @@ func clientHandler(req Request) {
 				debug(3, "%s: Tokenlist: %d = \"%s\"", req.GetRemoteAddr(), k, s)
 			}
 		}
-		cmd, ok := globalConfig.cmdlist.GetCommand(elems[0])
-		debug(1, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd)
+		cmd, ok := globalConfig.GetCommand(elems[0])
+		debug(1, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd.fp)
 		if ok {
-			req.WriteElement("OK")
 			debug(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), elems[0])
-			e = cmd(elems[1:], req)
+			fields, e := cmd.fp(elems[1:], cmd.confopts)
 			if e != nil {
+				req.WriteElement("ERR")
 				debug(1, "%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), elems[0], e)
+			} else {
+				req.WriteElement("OK")
+				for _, field := range fields {
+					req.WriteElement(field)
+				}
 			}
 		} else {
 			req.WriteElement("ERR")
@@ -267,10 +319,14 @@ func main() {
 	panicOnError("Reading configuration failed", e)
 
 	globalConfig = config
-	globalConfig.cmdlist.InitCommandList()
+	//	globalConfig.cmdlist.InitCommandList()
 	for _, cmd := range globalConfig.CommandConfigs {
 		debug(3, "Registered \"%s\"-Command", cmd.CommandName)
-		globalConfig.cmdlist.RegisterCommand(cmd.CommandName, builtins[cmd.CommandName])
+		fp, e := builtins[cmd.CommandName]
+		if !e {
+			panicOnError("Unknown command \"%s\"", os.NewError(""), cmd.CommandName)
+		}
+		globalConfig.RegisterCommand(cmd.CommandName, fp)
 	}
 
 	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
