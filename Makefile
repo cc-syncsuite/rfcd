@@ -2,16 +2,16 @@ include $(GOROOT)/src/Make.$(GOARCH)
 
 TARG=rfcd
 GOFILES=\
-	rfcd.go\
+	$(TARG).go\
 
 
 include $(GOROOT)/src/Make.pkg
 
-CLEANFILES+=rfcd
+CLEANFILES+=$(TARG)
 
-rfcd.$(O): rfcd.go
+$(TARG).$(O): $(TARG).go
 	$(QUOTED_GOBIN)/$(GC) -I_obj $<
 
-rfcd: rfcd.$(O)
+$(TARG): $(TARG).$(O)
 	$(QUOTED_GOBIN)/$(LD) -L_obj -o $@ $<
 
