@@ -23,9 +23,9 @@ const (
 var (
 	globalConfig rfcdConfig
 	builtins     = map[string]CommandFunc{
-		"echo": echo_command,
-		"exec": exec_command,
-		"cp":   cp_command,
+		"echo": echoCommand,
+		"exec": execCommand,
+		"cp":   cpCommand,
 	}
 )
 
@@ -113,11 +113,11 @@ type Command struct {
 // Command declarations
 type CommandFunc func(argv []string, confopts map[string]string) ([]string, os.Error)
 
-func echo_command(argv []string, confopts map[string]string) ([]string, os.Error) {
+func echoCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
 	return argv, nil
 }
 
-func exec_command(argv []string, confopts map[string]string) ([]string, os.Error) {
+func execCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
 	reStr, ok := confopts["Allow"]
 	if !ok {
 		debug(3, "\"Allow\" not configured, defaulting to \".+\"")
@@ -137,7 +137,7 @@ func exec_command(argv []string, confopts map[string]string) ([]string, os.Error
 
 	if !re.MatchString(newpath) {
 		debug(1, "\tReceived unallowed command \"%s\" (Rule: \"%s\")", newpath, confopts["Allow"])
-		return nil, os.NewError("Not Allowed")
+		return []string{"Not allowed"}, os.NewError("Not allowed")
 	}
 
 	cmd_exec, e := exec.Run(newpath, argv, nil, "/", exec.DevNull, exec.Pipe, exec.Pipe)
@@ -157,7 +157,7 @@ func exec_command(argv []string, confopts map[string]string) ([]string, os.Error
 }
 
 
-func cp_command(argv []string, confopts map[string]string) ([]string, os.Error) {
+func cpCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
 	src, e := os.Open(argv[0], os.O_RDONLY, 0)
 	if e != nil {
 		return nil, e
@@ -240,7 +240,6 @@ func readConfig(r io.Reader) (rfcdConfig, os.Error) {
 			error = os.NewError("Offending Token in config file: " + errTok)
 		}
 	}
-	//	config.CommandConfigs.ParsedCommandParams
 	return config, error
 }
 
@@ -285,6 +284,7 @@ func clientHandler(req Request) {
 		entity = myTrim(entity)
 		debug(1, "%s: Received \"%s\"", req.GetRemoteAddr(), entity)
 		elems := strings.Split(entity[0:len(entity)-1], globalConfig.Separator, 0)
+		elems = elems[0:len(elems)-1]
 
 		if globalConfig.Verbosity >= 3 {
 			for k, s := range elems {
@@ -301,9 +301,9 @@ func clientHandler(req Request) {
 				debug(1, "%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), elems[0], e)
 			} else {
 				req.WriteElement("OK")
-				for _, field := range fields {
-					req.WriteElement(field)
-				}
+			}
+			for _, field := range fields {
+				req.WriteElement(field)
 			}
 		} else {
 			req.WriteElement("ERR")
