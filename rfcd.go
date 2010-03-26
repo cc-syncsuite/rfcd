@@ -65,11 +65,11 @@ func (c *rfcdConfig) RegisterCommand(keyword string, fp CommandFunc) {
 			debug(4, "\t\t\"%s\" => \"%s\"", key, val)
 		}
 	}
-	c.parsed[keyword] = Command{keyword, fp, opts}
+	c.parsed[strings.ToLower(keyword)] = Command{keyword, fp, opts}
 }
 
 func (c *rfcdConfig) GetCommand(keyword string) (cmd Command, ok bool) {
-	cmd, ok = c.parsed[keyword]
+	cmd, ok = c.parsed[strings.ToLower(keyword)]
 	return
 }
 
@@ -131,7 +131,7 @@ func execCommand(argv []string, confopts map[string]string) ([]string, os.Error)
 
 	newpath, e := exec.LookPath(argv[0])
 	if e != nil {
-		return nil, e
+		return []string{"Command not found"}, e
 	}
 	debug(3, "\tFound executable in $PATH: %s", newpath)
 
@@ -142,7 +142,7 @@ func execCommand(argv []string, confopts map[string]string) ([]string, os.Error)
 
 	cmd_exec, e := exec.Run(newpath, argv, nil, "/", exec.DevNull, exec.Pipe, exec.Pipe)
 	if e != nil {
-		return nil, e
+		return []string{"Could not execute"}, e
 	}
 
 	debug(2, "Executed %s: PID %d", argv[0], cmd_exec.Pid)
@@ -294,11 +294,11 @@ func clientHandler(req Request) {
 		cmd, ok := globalConfig.GetCommand(elems[0])
 		debug(1, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd.fp)
 		if ok {
-			debug(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), elems[0])
+			debug(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), cmd.cmd)
 			fields, e := cmd.fp(elems[1:], cmd.confopts)
 			if e != nil {
 				req.WriteElement("ERR")
-				debug(1, "%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), elems[0], e)
+				debug(1, "%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), cmd.cmd, e)
 			} else {
 				req.WriteElement("OK")
 			}
@@ -321,12 +321,13 @@ func main() {
 	globalConfig = config
 	//	globalConfig.cmdlist.InitCommandList()
 	for _, cmd := range globalConfig.CommandConfigs {
-		debug(3, "Registered \"%s\"-Command", cmd.CommandName)
-		fp, e := builtins[cmd.CommandName]
+		lowered := strings.ToLower(cmd.CommandName)
+		debug(3, "Registered \"%s\"-Command", lowered)
+		fp, e := builtins[lowered]
 		if !e {
-			panicOnError("Unknown command \"%s\"", os.NewError(""), cmd.CommandName)
+			panicOnError("Unknown command \"%s\"", os.NewError(""), lowered)
 		}
-		globalConfig.RegisterCommand(cmd.CommandName, fp)
+		globalConfig.RegisterCommand(lowered, fp)
 	}
 
 	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
