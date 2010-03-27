@@ -6,14 +6,13 @@ import (
 	"io/ioutil"
 	"os"
 	"json"
-	"fmt"
 	"strconv"
 	"net"
-	"time"
 	"bufio"
 	"strings"
 	"regexp"
 	"exec"
+	"surmc"
 )
 
 const (
@@ -38,6 +37,7 @@ type rfcdConfig struct {
 	Separator      string
 	CommandConfigs []CommandConfig
 	parsed         map[string]Command
+	debug          surmc.Debug
 }
 
 func (c *rfcdConfig) GetSeparatorChar() byte { return c.Separator[0] }
@@ -60,9 +60,9 @@ func (c *rfcdConfig) RegisterCommand(keyword string, fp CommandFunc) {
 	cc, _ := c.getCommandConfig(keyword)
 	opts := stringSliceToMap(cc.CommandParams, ":")
 	if c.Verbosity >= 4 {
-		debug(4, "\t\"%s\" opts:", keyword)
+		globalConfig.debug.DebugPrintf(4, "\t\"%s\" opts:", keyword)
 		for key, val := range opts {
-			debug(4, "\t\t\"%s\" => \"%s\"", key, val)
+			globalConfig.debug.DebugPrintf(4, "\t\t\"%s\" => \"%s\"", key, val)
 		}
 	}
 	c.parsed[strings.ToLower(keyword)] = Command{keyword, fp, opts}
@@ -120,7 +120,7 @@ func echoCommand(argv []string, confopts map[string]string) ([]string, os.Error)
 func execCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
 	reStr, ok := confopts["Allow"]
 	if !ok {
-		debug(3, "\"Allow\" not configured, defaulting to \".+\"")
+		globalConfig.debug.DebugPrintf(3, "\"Allow\" not configured, defaulting to \".+\"")
 		reStr = ".+"
 	}
 
@@ -133,10 +133,10 @@ func execCommand(argv []string, confopts map[string]string) ([]string, os.Error)
 	if e != nil {
 		return []string{"Command not found"}, e
 	}
-	debug(3, "\tFound executable in $PATH: %s", newpath)
+	globalConfig.debug.DebugPrintf(3, "\tFound executable in $PATH: %s", newpath)
 
 	if !re.MatchString(newpath) {
-		debug(1, "\tReceived unallowed command \"%s\" (Rule: \"%s\")", newpath, confopts["Allow"])
+		globalConfig.debug.DebugPrintf(1, "\tReceived unallowed command \"%s\" (Rule: \"%s\")", newpath, confopts["Allow"])
 		return []string{"Not allowed"}, os.NewError("Not allowed")
 	}
 
@@ -145,7 +145,7 @@ func execCommand(argv []string, confopts map[string]string) ([]string, os.Error)
 		return []string{"Could not execute"}, e
 	}
 
-	debug(2, "Executed %s: PID %d", argv[0], cmd_exec.Pid)
+	globalConfig.debug.DebugPrintf(2, "Executed %s: PID %d", argv[0], cmd_exec.Pid)
 	cmd_exec.Wait(0)
 
 	var output [2]string
@@ -200,21 +200,6 @@ func myTrim(s string) string {
 	return s[i : j+1]
 }
 
-func panicOnError(msg string, e os.Error, a ...interface{}) {
-	if e != nil {
-		userMsg := fmt.Sprintf(msg, a)
-		fmt.Fprintf(os.Stderr, "Error: %s: %s\n", userMsg, e)
-		panic(msg)
-	}
-}
-
-func debug(level int, msg string, a ...interface{}) {
-	if globalConfig.Verbosity >= level {
-		newfmt := fmt.Sprintf("DEBUG(%d): [%s] ", level, time.LocalTime())
-		fmt.Printf(newfmt+msg+"\n", a)
-	}
-}
-
 func parseCmdLine() string {
 	file := flag.String("c", DEFAULT_CONF, "Path to configuration file")
 	flag.Parse()
@@ -248,6 +233,7 @@ func readConfigFile(file string) (config rfcdConfig, error os.Error) {
 	if error == nil {
 		config, error = readConfig(f)
 	}
+	config.debug.Level = config.Verbosity
 	return
 }
 
@@ -257,7 +243,7 @@ func fillRequestChannel(listener net.Listener, reqChannel chan Request) {
 		con, e := listener.Accept()
 		if e == nil {
 			req := NewRequest(con)
-			debug(1, "%s: connected", req.GetRemoteAddr())
+			globalConfig.debug.DebugPrintf(1, "%s: connected", req.GetRemoteAddr())
 			reqChannel <- req
 		}
 	}
@@ -267,7 +253,7 @@ func setupServer(addr string) (chan Request, os.Error) {
 	tcpAddr, e := net.ResolveTCPAddr(addr)
 	if e == nil {
 		listener, e := net.ListenTCP("tcp4", tcpAddr)
-		debug(2, "Created listener. Error: %s", e)
+		globalConfig.debug.DebugPrintf(2, "Created listener. Error: %s", e)
 		if e == nil {
 			reqChannel := make(chan Request, 5)
 			go fillRequestChannel(listener, reqChannel)
@@ -282,23 +268,23 @@ func clientHandler(req Request) {
 	br := bufio.NewReader(req.GetReader())
 	for entity, e := br.ReadString(globalConfig.GetDelimiterChar()); e == nil; entity, e = br.ReadString(globalConfig.GetDelimiterChar()) {
 		entity = myTrim(entity)
-		debug(1, "%s: Received \"%s\"", req.GetRemoteAddr(), entity)
+		globalConfig.debug.DebugPrintf(1, "%s: Received \"%s\"", req.GetRemoteAddr(), entity)
 		elems := strings.Split(entity[0:len(entity)-1], globalConfig.Separator, 0)
 		elems = elems[0:len(elems)-1]
 
 		if globalConfig.Verbosity >= 3 {
 			for k, s := range elems {
-				debug(3, "%s: Tokenlist: %d = \"%s\"", req.GetRemoteAddr(), k, s)
+				globalConfig.debug.DebugPrintf(3, "%s: Tokenlist: %d = \"%s\"", req.GetRemoteAddr(), k, s)
 			}
 		}
 		cmd, ok := globalConfig.GetCommand(elems[0])
-		debug(1, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd.fp)
+		globalConfig.debug.DebugPrintf(1, "%s: Command found: %t (%p)", req.GetRemoteAddr(), ok, cmd.fp)
 		if ok {
-			debug(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), cmd.cmd)
+			globalConfig.debug.DebugPrintf(2, "%s: Executing \"%s\"", req.GetRemoteAddr(), cmd.cmd)
 			fields, e := cmd.fp(elems[1:], cmd.confopts)
 			if e != nil {
 				req.WriteElement("ERR")
-				debug(1, "%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), cmd.cmd, e)
+				globalConfig.debug.DebugPrintf(1, "%s: Executing \"%s\" failed! %s", req.GetRemoteAddr(), cmd.cmd, e)
 			} else {
 				req.WriteElement("OK")
 			}
@@ -316,23 +302,22 @@ func main() {
 	configFile := parseCmdLine()
 
 	config, e := readConfigFile(configFile)
-	panicOnError("Reading configuration failed", e)
+	surmc.PanicOnError(e, "Reading configuration failed")
 
 	globalConfig = config
-	//	globalConfig.cmdlist.InitCommandList()
 	for _, cmd := range globalConfig.CommandConfigs {
 		lowered := strings.ToLower(cmd.CommandName)
-		debug(3, "Registered \"%s\"-Command", lowered)
+		globalConfig.debug.DebugPrintf(3, "Registered \"%s\"-Command", lowered)
 		fp, e := builtins[lowered]
 		if !e {
-			panicOnError("Unknown command \"%s\"", os.NewError(""), lowered)
+			surmc.PanicOnError(os.NewError(""), "Unknown command \"%s\"", lowered)
 		}
 		globalConfig.RegisterCommand(lowered, fp)
 	}
 
-	debug(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
+	globalConfig.debug.DebugPrintf(2, "Binding address: %s:%d", globalConfig.BindAddr, globalConfig.Port)
 	reqChannel, e := setupServer(globalConfig.BindAddr + ":" + strconv.Itoa(globalConfig.Port))
-	panicOnError("Opening server failed", e)
+	surmc.PanicOnError(e, "Opening server failed")
 
 	for req := range reqChannel {
 		go clientHandler(req)
