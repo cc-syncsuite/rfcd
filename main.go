@@ -23,7 +23,6 @@ var (
 		"echo":       echoCommand,
 		"exec":       execCommand,
 		"cp":         cpCommand,
-		"getclients": getClientsCommand,
 	}
 )
 

@@ -4,7 +4,6 @@ TARG=rfcd
 GOFILES=\
 	main.go\
 	clientcommands.go\
-	piggycommands.go\
 	rfcdconfig.go\
 
 include $(GOROOT)/src/Make.cmd
