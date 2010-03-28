@@ -10,8 +10,6 @@ import (
 	"net"
 	"bufio"
 	"strings"
-	"regexp"
-	"exec"
 	"surmc"
 )
 
@@ -22,62 +20,13 @@ const (
 var (
 	globalConfig rfcdConfig
 	builtins     = map[string]CommandFunc{
-		"echo": echoCommand,
-		"exec": execCommand,
-		"cp":   cpCommand,
+		"echo":       echoCommand,
+		"exec":       execCommand,
+		"cp":         cpCommand,
+		"getclients": getClientsCommand,
 	}
 )
 
-// Config declarations
-type rfcdConfig struct {
-	BindAddr       string
-	Port           int
-	Verbosity      int
-	Delimiter      string
-	Separator      string
-	CommandConfigs []CommandConfig
-	parsed         map[string]Command
-	debug          surmc.Debug
-}
-
-func (c *rfcdConfig) GetSeparatorChar() byte { return c.Separator[0] }
-
-func (c *rfcdConfig) GetDelimiterChar() byte { return c.Delimiter[0] }
-
-func (c *rfcdConfig) getCommandConfig(keyword string) (*CommandConfig, os.Error) {
-	for _, cc := range c.CommandConfigs {
-		if cc.CommandName == keyword {
-			return &cc, nil
-		}
-	}
-	return nil, os.NewError("Not a valid key")
-}
-
-func (c *rfcdConfig) RegisterCommand(keyword string, fp CommandFunc) {
-	if c.parsed == nil {
-		c.parsed = make(map[string]Command)
-	}
-	cc, _ := c.getCommandConfig(keyword)
-	opts := stringSliceToMap(cc.CommandParams, ":")
-	if c.Verbosity >= 4 {
-		globalConfig.debug.DebugPrintf(4, "\t\"%s\" opts:", keyword)
-		for key, val := range opts {
-			globalConfig.debug.DebugPrintf(4, "\t\t\"%s\" => \"%s\"", key, val)
-		}
-	}
-	c.parsed[strings.ToLower(keyword)] = Command{keyword, fp, opts}
-}
-
-func (c *rfcdConfig) GetCommand(keyword string) (cmd Command, ok bool) {
-	cmd, ok = c.parsed[strings.ToLower(keyword)]
-	return
-}
-
-// CommandConfig declaration
-type CommandConfig struct {
-	CommandName   string
-	CommandParams []string
-}
 
 // Request declarations
 type Request struct {
@@ -101,103 +50,6 @@ func (req *Request) WriteElement(s string) {
 
 func (req *Request) DelimitEntity() {
 	req.GetWriter().Write([]byte{globalConfig.GetDelimiterChar()})
-}
-
-// CommandInternals declarations
-type Command struct {
-	cmd      string
-	fp       CommandFunc
-	confopts map[string]string
-}
-
-// Command declarations
-type CommandFunc func(argv []string, confopts map[string]string) ([]string, os.Error)
-
-func echoCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
-	return argv, nil
-}
-
-func execCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
-	reStr, ok := confopts["Allow"]
-	if !ok {
-		globalConfig.debug.DebugPrintf(3, "\"Allow\" not configured, defaulting to \".+\"")
-		reStr = ".+"
-	}
-
-	re, e := regexp.Compile(reStr)
-	if e != nil {
-		return nil, e
-	}
-
-	newpath, e := exec.LookPath(argv[0])
-	if e != nil {
-		return []string{"Command not found"}, e
-	}
-	globalConfig.debug.DebugPrintf(3, "\tFound executable in $PATH: %s", newpath)
-
-	if !re.MatchString(newpath) {
-		globalConfig.debug.DebugPrintf(1, "\tReceived unallowed command \"%s\" (Rule: \"%s\")", newpath, confopts["Allow"])
-		return []string{"Not allowed"}, os.NewError("Not allowed")
-	}
-
-	cmd_exec, e := exec.Run(newpath, argv, nil, "/", exec.DevNull, exec.Pipe, exec.Pipe)
-	if e != nil {
-		return []string{"Could not execute"}, e
-	}
-
-	globalConfig.debug.DebugPrintf(2, "Executed %s: PID %d", argv[0], cmd_exec.Pid)
-	cmd_exec.Wait(0)
-
-	var output [2]string
-	read, _ := ioutil.ReadAll(cmd_exec.Stdout)
-	output[0] = string(read)
-	read, _ = ioutil.ReadAll(cmd_exec.Stderr)
-	output[1] = string(read)
-	return &output, nil
-}
-
-
-func cpCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
-	src, e := os.Open(argv[0], os.O_RDONLY, 0)
-	if e != nil {
-		return nil, e
-	}
-
-	srcstat, e := src.Stat()
-	if e != nil {
-		return nil, e
-	}
-
-	dst, e := os.Open(argv[1], os.O_WRONLY|os.O_CREATE, srcstat.Permission())
-	if e != nil {
-		return nil, e
-	}
-
-	data, e := ioutil.ReadAll(src)
-	if e != nil {
-		return nil, e
-	}
-
-	_, e = dst.Write(data)
-	if e != nil {
-		return nil, e
-	}
-
-	return nil, nil
-
-}
-
-// Program functions
-
-func isWhite(b byte) bool { return b == ' ' || b == '\n' || b == '\t' }
-
-func myTrim(s string) string {
-	var i, j int
-	for i = 0; i < len(s) && isWhite(s[i]); i++ {
-	}
-	for j = len(s) - 1; j > 0 && isWhite(s[j]); j-- {
-	}
-	return s[i : j+1]
 }
 
 func parseCmdLine() string {
@@ -267,10 +119,10 @@ func setupServer(addr string) (chan Request, os.Error) {
 func clientHandler(req Request) {
 	br := bufio.NewReader(req.GetReader())
 	for entity, e := br.ReadString(globalConfig.GetDelimiterChar()); e == nil; entity, e = br.ReadString(globalConfig.GetDelimiterChar()) {
-		entity = myTrim(entity)
+		entity = surmc.TrimSpace(entity)
 		globalConfig.debug.DebugPrintf(1, "%s: Received \"%s\"", req.GetRemoteAddr(), entity)
 		elems := strings.Split(entity[0:len(entity)-1], globalConfig.Separator, 0)
-		elems = elems[0:len(elems)-1]
+		elems = elems[0 : len(elems)-1]
 
 		if globalConfig.Verbosity >= 3 {
 			for k, s := range elems {

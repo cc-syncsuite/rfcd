@@ -2,7 +2,10 @@ include $(GOROOT)/src/Make.$(GOARCH)
 
 TARG=rfcd
 GOFILES=\
-	$(TARG).go\
+	main.go\
+	clientcommands.go\
+	piggycommands.go\
+	rfcdconfig.go\
 
 include $(GOROOT)/src/Make.cmd
 
