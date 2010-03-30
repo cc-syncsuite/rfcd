@@ -13,6 +13,8 @@ func echoCommand(argv []string, confopts map[string]string) ([]string, os.Error)
 
 func execCommand(argv []string, confopts map[string]string) ([]string, os.Error) {
 	reStr, ok := confopts["Allow"]
+	env := confopts["Env"]
+
 	if !ok {
 		globalConfig.debug.DebugPrintf(3, "\"Allow\" not configured, defaulting to \".+\"")
 		reStr = ".+"
@@ -34,7 +36,7 @@ func execCommand(argv []string, confopts map[string]string) ([]string, os.Error)
 		return []string{"Not allowed"}, os.NewError("Not allowed")
 	}
 
-	cmd_exec, e := exec.Run(newpath, argv, nil, "/", exec.DevNull, exec.Pipe, exec.Pipe)
+	cmd_exec, e := exec.Run(newpath, argv, []string{env}, "/", exec.DevNull, exec.Pipe, exec.Pipe)
 	if e != nil {
 		return []string{"Could not execute"}, e
 	}
